@@ -500,44 +500,26 @@ with tab2:
     st.markdown("### 🔄 What-If Simulator")
     st.markdown(
         '<div class="info-box">'
-        "Adjust key levers to instantly see how interventions affect churn probability."
+        "Adjust key levers to instantly see how interventions affect churn probability. "
+        "The baseline is automatically synced with your inputs from the Prediction tab."
         "</div>",
         unsafe_allow_html=True,
     )
 
-    # Base values (mirrors the main tab so the user can compare)
     wif_col1, wif_col2 = st.columns([1, 1])
 
     with wif_col1:
-        st.markdown("**Base Customer (same as Prediction tab)**")
-        wif_credit_score = st.number_input(
-            "Credit Score", 300, 850, 650, 1, key="cs_wif_base"
-        )
-        wif_geography = st.selectbox(
-            "Geography", ["France", "Spain", "Germany"], key="geo_wif_base"
-        )
-        wif_gender = st.selectbox("Gender", ["Female", "Male"], key="gender_wif_base")
-        wif_age    = st.number_input("Age", 18, 100, 40, 1, key="age_wif_base")
-        wif_tenure = st.number_input("Tenure (years)", 0, 20, 5, 1, key="ten_wif_base")
-        wif_balance = st.number_input(
-            "Balance (€)", 0.0, 300_000.0, 75_000.0, 500.0,
-            format="%.2f", key="bal_wif_base"
-        )
-        wif_nop = st.number_input(
-            "Num of Products", 1, 4, 1, 1, key="nop_wif_base"
-        )
-        wif_hcc    = st.selectbox(
-            "Has Credit Card", [0, 1],
-            format_func=lambda x: "Yes" if x else "No", key="hcc_wif_base"
-        )
-        wif_active = st.selectbox(
-            "Is Active Member", [0, 1],
-            format_func=lambda x: "Yes" if x else "No", key="iam_wif_base"
-        )
-        wif_salary = st.number_input(
-            "Salary (€)", 0.0, 300_000.0, 100_000.0, 500.0,
-            format="%.2f", key="sal_wif_base"
-        )
+        st.markdown("**📋 Baseline Profile (from Prediction tab)**")
+        # Display baseline values for context
+        st.markdown(f"- **Geography:** {geography}")
+        st.markdown(f"- **Age:** {age}")
+        st.markdown(f"- **Credit Score:** {credit_score}")
+        st.markdown(f"- **Salary:** €{salary:,.2f}")
+        st.markdown("---")
+        st.markdown("**Current State of Levers:**")
+        st.markdown(f"- **Active Member:** {'✅ Yes' if is_active else '❌ No'}")
+        st.markdown(f"- **Number of Products:** {num_products}")
+        st.markdown(f"- **Account Balance:** €{balance:,.2f}")
 
     with wif_col2:
         st.markdown("**🎚️ Simulate Interventions**")
@@ -548,37 +530,36 @@ with tab2:
         wif_active_sim = st.selectbox(
             "Is Active Member (after intervention)", [0, 1],
             format_func=lambda x: "✅ Yes (Active)" if x else "❌ No (Inactive)",
-            index=1,       # default to active
+            index=is_active,       
             key="iam_wif_sim",
             help="Activating a member is the single biggest lever in most churn models.",
         )
         wif_nop_sim = st.number_input(
-            "Num of Products (after cross-sell)", 1, 4, 2, 1,
+            "Num of Products (after cross-sell)", 1, 4, 
+            value=num_products,
             key="nop_wif_sim",
             help="Customers with 2 products churn far less.",
         )
         wif_balance_sim = st.number_input(
             "Balance (€) after deposit / offer", 0.0, 300_000.0,
-            wif_balance,     # start same as base
-            500.0, format="%.2f",
+            value=balance,
+            step=500.0, format="%.2f",
             key="bal_wif_sim",
         )
 
         st.markdown("---")
         if st.button("⚡  Run Simulation", use_container_width=True):
-            # Score baseline
+            # Score baseline using Prediction tab values
             base_res = score_customer(
-                wif_credit_score, wif_geography, wif_gender,
-                wif_age, wif_tenure, wif_balance, wif_nop,
-                wif_hcc, wif_active, wif_salary,
+                credit_score, geography, gender, age, tenure,
+                balance, num_products, has_cr_card, is_active, salary,
                 threshold=active_threshold,
                 risk_band_mode=risk_band_mode,
             )
-            # Score simulated
+            # Score simulated using adjusted values
             sim_res = score_customer(
-                wif_credit_score, wif_geography, wif_gender,
-                wif_age, wif_tenure, wif_balance_sim, wif_nop_sim,
-                wif_hcc, wif_active_sim, wif_salary,
+                credit_score, geography, gender, age, tenure,
+                wif_balance_sim, wif_nop_sim, has_cr_card, wif_active_sim, salary,
                 threshold=active_threshold,
                 risk_band_mode=risk_band_mode,
             )
@@ -604,9 +585,9 @@ with tab2:
             # Comparison table
             comparison = pd.DataFrame({
                 "Scenario":            ["Baseline", "Simulated"],
-                "IsActiveMember":      [wif_active, wif_active_sim],
-                "NumOfProducts":       [wif_nop, wif_nop_sim],
-                "Balance (€)":         [wif_balance, wif_balance_sim],
+                "IsActiveMember":      [is_active, wif_active_sim],
+                "NumOfProducts":       [num_products, wif_nop_sim],
+                "Balance (€)":         [balance, wif_balance_sim],
                 "Churn Probability":   [
                     f"{base_res['prob']*100:.1f}%",
                     f"{sim_res['prob']*100:.1f}%",
