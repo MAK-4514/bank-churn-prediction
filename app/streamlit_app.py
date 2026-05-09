@@ -165,13 +165,11 @@ def load_model():
     model_path = PROJECT_ROOT / "models" / "model.pkl"
     threshold_path = PROJECT_ROOT / "models" / "best_threshold.json"
 
-    # If model missing, app will stop later with your existing guard
     if not model_path.exists():
         return None, None, None
 
     pipeline = joblib.load(model_path)
 
-    # Safe defaults (if JSON missing / broken)
     best_f1 = 0.50
     best_recall = 0.50
 
@@ -185,7 +183,6 @@ def load_model():
             if cfg.get("best_threshold_recall") is not None:
                 best_recall = float(cfg["best_threshold_recall"])
         except Exception:
-            # keep defaults
             pass
 
     return pipeline, best_f1, best_recall
