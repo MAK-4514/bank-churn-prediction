@@ -10,7 +10,6 @@ ENV/
 
 # Data and Models
 data/*.csv
-models/*.pkl
 
 # Ignore outputs (metrics, plots)
 # outputs/
