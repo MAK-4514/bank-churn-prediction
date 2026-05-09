@@ -334,7 +334,7 @@ with st.sidebar:
         )
 
 # ── Main panel ───────────────────────────────────────────────────────────────
-tab1, tab2 = st.tabs(["🔍  Customer Prediction", "🔄  What-If Simulator"])
+tab1, tab2, tab3 = st.tabs(["🔍  Customer Prediction", "🔄  What-If Simulator", "🧠  Model Explainability"])
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 1 – Customer Prediction
@@ -390,6 +390,11 @@ with tab1:
         )
 
     st.markdown("---")
+    
+    # Input validation / sanity hint
+    if balance > 150_000 and salary < 30_000:
+        st.warning("⚠️ **Data Sanity Hint:** The account balance is unusually high compared to the estimated salary. Please verify the inputs.")
+        
     predict_btn = st.button("🚀  Predict Churn Risk", use_container_width=True)
 
     if predict_btn:
@@ -446,6 +451,31 @@ with tab1:
                 "or fee waiver for the next billing period."
             )
         st.info(narrative)
+
+        # Export result
+        st.markdown("---")
+        export_data = {
+            "CreditScore": credit_score,
+            "Geography": geography,
+            "Gender": gender,
+            "Age": age,
+            "Tenure": tenure,
+            "Balance": balance,
+            "NumOfProducts": num_products,
+            "HasCrCard": has_cr_card,
+            "IsActiveMember": is_active,
+            "EstimatedSalary": salary,
+            "ChurnProbability": round(prob, 4),
+            "RiskBand": band,
+            "ChurnFlag": bool(flag)
+        }
+        st.download_button(
+            label="📥 Download Executive Summary (JSON)",
+            data=json.dumps(export_data, indent=2),
+            file_name="churn_prediction_summary.json",
+            mime="application/json",
+            use_container_width=True
+        )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 2 – What-If Simulator
@@ -590,6 +620,25 @@ with tab2:
                     "ℹ️ The interventions have a modest effect (<5pp change). "
                     "Consider stronger or combined actions."
                 )
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TAB 3 – Model Explainability
+# ═════════════════════════════════════════════════════════════════════════════
+with tab3:
+    st.markdown("### 🧠 Model Explainability")
+    st.markdown(
+        '<div class="info-box">'
+        "Understand which factors drive the Gradient Boosting model's predictions. "
+        "These are global feature importances extracted directly from the trained pipeline."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    
+    fi_path = PROJECT_ROOT / "outputs" / "feature_importance.png"
+    if fi_path.exists():
+        st.image(str(fi_path), caption="Global Feature Importance (Gradient Boosting)", use_container_width=True)
+    else:
+        st.info("Feature importance plot not found. Ensure models have been trained and evaluated.")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
