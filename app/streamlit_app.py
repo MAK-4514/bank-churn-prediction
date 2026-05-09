@@ -19,16 +19,19 @@ streamlit run app/streamlit_app.py
 
 import sys
 import json
+import csv
 import numpy as np
 import pandas as pd
 import joblib
 import streamlit as st
 import matplotlib.pyplot as plt
+from datetime import datetime
 from pathlib import Path
 
 # ── Path setup ────────────────────────────────────────────────────────────────
 APP_DIR     = Path(__file__).resolve().parent       # app/
 PROJECT_ROOT = APP_DIR.parent                        # d:/project/
+LOG_DIR      = PROJECT_ROOT / "logs"
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from utils import assign_risk_band, assign_risk_band_optimized  # noqa: E402
@@ -374,6 +377,25 @@ with st.sidebar:
             f"| 🔴 High   | ≥ {active_threshold:.2f} |"
         )
 
+    st.markdown("---")
+    st.markdown("### 📝 Audit Logging")
+    enable_logging = st.checkbox(
+        "Enable audit logging", 
+        value=True, 
+        help="Record all predictions to logs/predictions.csv for traceability."
+    )
+    
+    log_file = LOG_DIR / "predictions.csv"
+    if log_file.exists():
+        with open(log_file, "rb") as f:
+            st.download_button(
+                "📥 Download Prediction Logs",
+                data=f,
+                file_name="prediction_audit_log.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
 # ── Main panel ───────────────────────────────────────────────────────────────
 tab1, tab2, tab3 = st.tabs(["🔍  Customer Prediction", "🔄  What-If Simulator", "🧠  Model Explainability"])
 
@@ -448,6 +470,27 @@ with tab1:
         prob = result["prob"]
         band = result["band"]
         flag = result["flag"]
+
+        # Audit Logging
+        if enable_logging:
+            LOG_DIR.mkdir(exist_ok=True)
+            log_exists = log_file.exists()
+            with open(log_file, mode="a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                if not log_exists:
+                    writer.writerow([
+                        "Timestamp", "CreditScore", "Geography", "Gender", "Age", 
+                        "Tenure", "Balance", "NumOfProducts", "HasCrCard", 
+                        "IsActiveMember", "EstimatedSalary", "Probability", 
+                        "Threshold", "RiskBand", "ChurnFlag", "BandingMode"
+                    ])
+                writer.writerow([
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    credit_score, geography, gender, age, tenure, balance, 
+                    num_products, has_cr_card, is_active, salary, 
+                    round(prob, 4), round(active_threshold, 4), 
+                    band, flag, risk_band_mode
+                ])
 
         st.markdown("---")
         st.markdown("### 📈 Prediction Results")
