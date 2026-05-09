@@ -213,6 +213,7 @@ def score_customer(
     if threshold is None:
         threshold = BEST_THRESH_F1
 
+    # 1. Build initial input DataFrame
     row = pd.DataFrame([{
         "CreditScore":      credit_score,
         "Geography":        geography,
@@ -226,6 +227,30 @@ def score_customer(
         "EstimatedSalary":  salary,
     }])
 
+    # 2. Audit columns vs Training Pipeline (Defensive check)
+    if hasattr(pipeline, "feature_names_in_"):
+        expected_cols = list(pipeline.feature_names_in_)
+        current_cols = list(row.columns)
+        
+        missing = set(expected_cols) - set(current_cols)
+        extra = set(current_cols) - set(expected_cols)
+        
+        if missing or extra:
+            st.error(f"⚠️ **Feature Mismatch Detected!**\n\nMissing: `{missing}`\nExtra: `{extra}`")
+            st.stop()
+            
+        # Reorder to match training exactly
+        row = row[expected_cols]
+
+    # 3. Categorical value validation (Graceful handling)
+    # The preprocessor uses handle_unknown='ignore', but we log a warning for visibility
+    valid_geos = ["France", "Germany", "Spain"]
+    valid_genders = ["Female", "Male"]
+    
+    if geography not in valid_geos or gender not in valid_genders:
+        st.warning(f"ℹ️ Unknown categorical value detected (`{geography}`/`{gender}`). Pipeline will handle via 'ignore' logic.")
+
+    # 4. Inference
     prob  = float(pipeline.predict_proba(row)[0, 1])
     
     if risk_band_mode == "Optimized (Uses Threshold)":
