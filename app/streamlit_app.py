@@ -170,22 +170,20 @@ def load_model():
 
     pipeline = joblib.load(model_path)
 
-    best_f1 = None
-    best_recall = None
+    best_f1 = 0.50
+    best_recall = 0.50
+
     if threshold_path.exists():
         try:
             with open(threshold_path) as f:
                 cfg = json.load(f)
-            best_f1 = float(cfg.get("best_threshold_f1")) if cfg.get("best_threshold_f1") is not None else None
-            best_recall = float(cfg.get("best_threshold_recall")) if cfg.get("best_threshold_recall") is not None else None
+            if cfg.get("best_threshold_f1") is not None:
+                best_f1 = float(cfg["best_threshold_f1"])
+            if cfg.get("best_threshold_recall") is not None:
+                best_recall = float(cfg["best_threshold_recall"])
         except Exception:
-            best_f1, best_recall = None, None
-
-    # Safe defaults if json missing
-    if best_f1 is None:
-        best_f1 = 0.50
-    if best_recall is None:
-        best_recall = best_f1
+            # keep defaults
+            pass
 
     return pipeline, best_f1, best_recall
 
@@ -234,7 +232,7 @@ def score_customer(
 def render_risk_badge(band: str) -> str:
     css = {"Low": "badge-low", "Medium": "badge-medium", "High": "badge-high"}
     cls = css.get(band, "badge-medium")
-    return f'<span class="badge {cls}">{band} Risk</span>'
+    return f'<span class="badge {cls}">{band.upper()} RISK</span>'
 
 
 def render_prob_bar(prob: float) -> str:
