@@ -157,7 +157,7 @@ hr { border-color: var(--border) !important; }
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Model loading (cached so it only loads once)
+# Model loading (cached so it only loads once)  ✅ SAFE VERSION
 # ──────────────────────────────────────────────────────────────────────────────
 
 @st.cache_resource(show_spinner="Loading model…")
@@ -165,11 +165,13 @@ def load_model():
     model_path = PROJECT_ROOT / "models" / "model.pkl"
     threshold_path = PROJECT_ROOT / "models" / "best_threshold.json"
 
+    # If model missing, app will stop later with your existing guard
     if not model_path.exists():
         return None, None, None
 
     pipeline = joblib.load(model_path)
 
+    # Safe defaults (if JSON missing / broken)
     best_f1 = 0.50
     best_recall = 0.50
 
@@ -177,6 +179,7 @@ def load_model():
         try:
             with open(threshold_path) as f:
                 cfg = json.load(f)
+
             if cfg.get("best_threshold_f1") is not None:
                 best_f1 = float(cfg["best_threshold_f1"])
             if cfg.get("best_threshold_recall") is not None:
