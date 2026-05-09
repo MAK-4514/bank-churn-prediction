@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 import joblib
 import streamlit as st
+import matplotlib.pyplot as plt
 from pathlib import Path
 
 # ── Path setup ────────────────────────────────────────────────────────────────
@@ -643,17 +644,100 @@ with tab3:
     st.markdown("### 🧠 Model Explainability")
     st.markdown(
         '<div class="info-box">'
-        "Understand which factors drive the Gradient Boosting model's predictions. "
-        "These are global feature importances extracted directly from the trained pipeline."
+        "Understand which factors drive the model's predictions globally, and locally for the current customer."
         "</div>",
         unsafe_allow_html=True,
     )
     
+    st.markdown("#### 🌍 Global Feature Importance")
     fi_path = PROJECT_ROOT / "outputs" / "feature_importance.png"
     if fi_path.exists():
         st.image(str(fi_path), caption="Global Feature Importance (Gradient Boosting)", use_container_width=True)
     else:
         st.info("Feature importance plot not found. Ensure models have been trained and evaluated.")
+
+    st.markdown("---")
+    st.markdown("#### 👤 Local Explanation (Current Customer)")
+    
+    if pipeline is not None and pipeline != "NO_PROBA":
+        try:
+            import shap
+            
+            # The current state of the widgets from Tab 1
+            current_row = pd.DataFrame([{
+                "CreditScore":      credit_score,
+                "Geography":        geography,
+                "Gender":           gender,
+                "Age":              age,
+                "Tenure":           tenure,
+                "Balance":          balance,
+                "NumOfProducts":    num_products,
+                "HasCrCard":        int(has_cr_card),
+                "IsActiveMember":   int(is_active),
+                "EstimatedSalary":  salary,
+            }])
+            
+            preprocessor = pipeline.named_steps["preprocessor"]
+            classifier = pipeline.named_steps["classifier"]
+            X_transformed = preprocessor.transform(current_row)
+            
+            tree_models = ("GradientBoostingClassifier", "RandomForestClassifier", "DecisionTreeClassifier", "XGBClassifier", "LGBMClassifier")
+            model_type = type(classifier).__name__
+            
+            if model_type in tree_models:
+                # TreeExplainer is fast for tree-based models
+                explainer = shap.TreeExplainer(classifier)
+                shap_values = explainer.shap_values(X_transformed)
+                
+                # Handle binary classification lists
+                if isinstance(shap_values, list):
+                    sv = shap_values[1][0]
+                else:
+                    sv = shap_values[0]
+                    
+                # Get feature names
+                if hasattr(preprocessor, "get_feature_names_out"):
+                    feature_names = preprocessor.get_feature_names_out()
+                else:
+                    feature_names = [f"Feature {i}" for i in range(X_transformed.shape[1])]
+                
+                # Build a robust dark-themed horizontal bar plot
+                fig, ax = plt.subplots(figsize=(8, 5))
+                idx = np.argsort(np.abs(sv))
+                colors = ['#ef4444' if val > 0 else '#10b981' for val in sv[idx]]
+                
+                ax.barh(np.array(feature_names)[idx], sv[idx], color=colors)
+                ax.set_xlabel("SHAP Value (Impact on Churn Probability Log-Odds)")
+                ax.set_title(f"Why did this customer get this score? ({model_type})")
+                
+                # Apply dark theme formatting
+                fig.patch.set_facecolor('#1e293b')
+                ax.set_facecolor('#1e293b')
+                ax.xaxis.label.set_color('#f1f5f9')
+                ax.yaxis.label.set_color('#f1f5f9')
+                ax.title.set_color('#f1f5f9')
+                ax.tick_params(colors='#94a3b8')
+                for spine in ax.spines.values():
+                    spine.set_color('#334155')
+                    
+                st.pyplot(fig)
+                plt.close(fig)
+                
+                st.markdown(
+                    "<small><i>Red bars increase churn risk, green bars decrease churn risk. "
+                    "Longer bars have a stronger impact.</i></small>",
+                    unsafe_allow_html=True
+                )
+            else:
+                st.info(f"Local explanations via SHAP are currently optimized for tree-based models. "
+                        f"Current model: `{model_type}`.")
+                
+        except ImportError:
+            st.warning("⚠️ `shap` library not found. Please add `shap` to your requirements to see local explanations.")
+        except Exception as e:
+            st.warning(f"⚠️ Could not generate local SHAP explanation: {e}")
+    else:
+        st.warning("Model not loaded properly.")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
