@@ -1,20 +1,16 @@
 """
 streamlit_app.py
 ----------------
-Bank Customer Churn Risk Scoring – Interactive Streamlit Application.
+Bank Customer Churn Risk Scoring – Interactive Streamlit Application (v2.0.0).
 
 Features
 --------
-• Loads the trained GBC pipeline from models/model.pkl
-• Interactive input panel for all 10 customer features
-• Displays churn probability, risk band, and churn decision
-• Gauge / progress bar visualisation of risk
-• What-If Simulator: adjust 3 key levers and see probability change instantly
-• Comparison table between original and what-if scenario
-
-Run
----
-streamlit run app/streamlit_app.py
+• Loads the trained GBC pipeline from models/model.pkl (Defensive checks included)
+• Feature Auditing: Ensures inference columns match training exactly
+• Tab 1: Customer Prediction UI
+• Tab 2: What-If Simulator (Synced with Tab 1)
+• Tab 3: SHAP Model Explainability
+• Audit Logging: Record all predictions to logs/predictions.csv
 """
 
 import sys
@@ -29,19 +25,18 @@ from datetime import datetime
 from pathlib import Path
 
 # ── Path setup ────────────────────────────────────────────────────────────────
-APP_DIR     = Path(__file__).resolve().parent       # app/
-PROJECT_ROOT = APP_DIR.parent                        # d:/project/
+APP_DIR      = Path(__file__).resolve().parent       # app/
+PROJECT_ROOT = APP_DIR.parent                        # project root
 LOG_DIR      = PROJECT_ROOT / "logs"
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+# Internal imports
 from utils import assign_risk_band, assign_risk_band_optimized  # noqa: E402
-
 from version import __version__ as APP_VERSION
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Page configuration
 # ──────────────────────────────────────────────────────────────────────────────
-
 st.set_page_config(
     page_title="Bank Churn Risk Scorer",
     page_icon="🏦",
@@ -52,11 +47,9 @@ st.set_page_config(
 # ──────────────────────────────────────────────────────────────────────────────
 # Custom CSS – premium dark UI
 # ──────────────────────────────────────────────────────────────────────────────
-
 st.markdown(
     """
 <style>
-/* ── Root palette ───────────────────────────────────── */
 :root {
   --bg-primary:    #0f172a;
   --bg-secondary:  #1e293b;
@@ -70,91 +63,43 @@ st.markdown(
   --text-muted:    #94a3b8;
   --border:        #334155;
 }
-
-/* ── Global overrides ───────────────────────────────── */
 .stApp {
   background: var(--bg-primary) !important;
   color: var(--text-primary) !important;
   font-family: 'Inter', 'Segoe UI', sans-serif;
 }
-
-/* Sidebar */
 section[data-testid="stSidebar"] {
   background: var(--bg-secondary) !important;
   border-right: 1px solid var(--border);
 }
-
-/* Metric cards */
 div[data-testid="metric-container"] {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 16px 20px;
 }
-
-/* Buttons */
 .stButton > button {
   background: linear-gradient(135deg, #3b82f6, #8b5cf6) !important;
   color: white !important;
   border: none !important;
   border-radius: 10px !important;
   font-weight: 600 !important;
-  font-size: 1rem !important;
   padding: 0.6rem 2.2rem !important;
-  transition: opacity 0.2s !important;
 }
-.stButton > button:hover { opacity: 0.88 !important; }
-
-/* Dividers */
-hr { border-color: var(--border) !important; }
-
-/* Risk band badges */
 .badge {
   display: inline-block;
   padding: 6px 18px;
   border-radius: 50px;
   font-weight: 700;
-  font-size: 1.1rem;
-  letter-spacing: 0.05em;
 }
 .badge-low    { background: #064e3b; color: #34d399; border: 1px solid #34d399; }
 .badge-medium { background: #78350f; color: #fbbf24; border: 1px solid #fbbf24; }
 .badge-high   { background: #7f1d1d; color: #f87171; border: 1px solid #f87171; }
-
-/* Section header */
-.section-header {
-  font-size: 1.15rem;
-  font-weight: 700;
-  color: var(--accent-blue);
-  letter-spacing: 0.04em;
-  margin-bottom: 6px;
-  border-bottom: 2px solid var(--accent-blue);
-  padding-bottom: 4px;
-}
-
-/* Probability bar container */
-.prob-bar-outer {
-  background: #334155;
-  border-radius: 8px;
-  height: 22px;
-  width: 100%;
-  overflow: hidden;
-  margin-top: 8px;
-}
-.prob-bar-inner {
-  height: 100%;
-  border-radius: 8px;
-  transition: width 0.5s ease;
-}
-
-/* Info callout box */
 .info-box {
   background: #1e293b;
   border-left: 4px solid var(--accent-blue);
-  border-radius: 6px;
   padding: 12px 16px;
-  margin: 10px 0;
-  font-size: 0.9rem;
+  border-radius: 6px;
   color: var(--text-muted);
 }
 </style>
@@ -163,637 +108,263 @@ hr { border-color: var(--border) !important; }
 )
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Model loading (cached so it only loads once)  ✅ SAFE VERSION
+# Model loading
 # ──────────────────────────────────────────────────────────────────────────────
-
 @st.cache_resource(show_spinner="Loading model…")
 def load_model():
     model_path = PROJECT_ROOT / "models" / "model.pkl"
     threshold_path = PROJECT_ROOT / "models" / "best_threshold.json"
 
     if not model_path.exists():
-        return None, None, None
+        return None, 0.50, 0.50, f"Model file not found at {model_path}"
 
-    pipeline = joblib.load(model_path)
-    
+    try:
+        pipeline = joblib.load(model_path)
+    except Exception as e:
+        return None, 0.50, 0.50, f"Error loading model: {e}"
+
     if not hasattr(pipeline, "predict_proba"):
-        return "NO_PROBA", None, None
+        return "NO_PROBA", 0.50, 0.50, "Loaded pipeline does not support predict_proba."
 
-    best_f1 = 0.50
-    best_recall = 0.50
-
+    best_f1, best_recall = 0.50, 0.50
     if threshold_path.exists():
         try:
             with open(threshold_path) as f:
                 cfg = json.load(f)
-
-            if cfg.get("best_threshold_f1") is not None:
-                best_f1 = float(cfg["best_threshold_f1"])
-            if cfg.get("best_threshold_recall") is not None:
-                best_recall = float(cfg["best_threshold_recall"])
+            best_f1 = float(cfg.get("best_threshold_f1", 0.50))
+            best_recall = float(cfg.get("best_threshold_recall", 0.50))
         except Exception:
             pass
 
-    return pipeline, best_f1, best_recall
+    return pipeline, best_f1, best_recall, None
 
-
-pipeline, BEST_THRESH_F1, BEST_THRESH_RECALL = load_model()
+pipeline, BEST_THRESH_F1, BEST_THRESH_RECALL, load_error = load_model()
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Scoring helper
+# Feature Audit & Scoring
 # ──────────────────────────────────────────────────────────────────────────────
-
-def score_customer(
-    credit_score, geography, gender, age, tenure,
-    balance, num_products, has_cr_card, is_active, salary,
-    threshold: float = None,
-    risk_band_mode: str = "Fixed (0.40 / 0.70)",
-) -> dict:
-    """Build feature dict, run through pipeline, return result dict."""
-    if pipeline is None or pipeline == "NO_PROBA" or not hasattr(pipeline, "predict_proba"):
+def score_customer(data: dict, threshold: float, mode: str) -> dict:
+    if pipeline is None or pipeline == "NO_PROBA":
         return {"prob": 0.0, "band": "Unknown", "flag": 0}
 
-    if threshold is None:
-        threshold = BEST_THRESH_F1
-
-    # 1. Build initial input DataFrame
-    row = pd.DataFrame([{
-        "CreditScore":      credit_score,
-        "Geography":        geography,
-        "Gender":           gender,
-        "Age":              age,
-        "Tenure":           tenure,
-        "Balance":          balance,
-        "NumOfProducts":    num_products,
-        "HasCrCard":        int(has_cr_card),
-        "IsActiveMember":   int(is_active),
-        "EstimatedSalary":  salary,
-    }])
-
-    # 2. Audit columns vs Training Pipeline (Defensive check)
+    # 1. Build DataFrame
+    row = pd.DataFrame([data])
+    
+    # 2. Audit Features
     if hasattr(pipeline, "feature_names_in_"):
-        expected_cols = list(pipeline.feature_names_in_)
-        current_cols = list(row.columns)
-        
-        missing = set(expected_cols) - set(current_cols)
-        extra = set(current_cols) - set(expected_cols)
+        expected = list(pipeline.feature_names_in_)
+        missing = set(expected) - set(row.columns)
+        extra = set(row.columns) - set(expected)
         
         if missing or extra:
-            st.error(f"⚠️ **Feature Mismatch Detected!**\n\nMissing: `{missing}`\nExtra: `{extra}`")
+            st.error(f"⚠️ **Feature Schema Mismatch!**\n\nMissing: `{missing}`\nExtra: `{extra}`")
             st.stop()
-            
-        # Reorder to match training exactly
-        row = row[expected_cols]
-
-    # 3. Categorical value validation (Graceful handling)
-    # The preprocessor uses handle_unknown='ignore', but we log a warning for visibility
-    valid_geos = ["France", "Germany", "Spain"]
-    valid_genders = ["Female", "Male"]
-    
-    if geography not in valid_geos or gender not in valid_genders:
-        st.warning(f"ℹ️ Unknown categorical value detected (`{geography}`/`{gender}`). Pipeline will handle via 'ignore' logic.")
-
-    # 4. Inference
-    prob  = float(pipeline.predict_proba(row)[0, 1])
-    
-    if risk_band_mode == "Optimized (Uses Threshold)":
-        band = str(assign_risk_band_optimized(np.array([prob]), threshold)[0])
-    else:
-        band = str(assign_risk_band(np.array([prob]))[0])
         
-    flag  = int(prob >= threshold)
-
-    return {"prob": prob, "band": band, "flag": flag}
-
+        row = row[expected] # Reorder
+    
+    # 3. Predict
+    prob = float(pipeline.predict_proba(row)[0, 1])
+    
+    # 4. Banding
+    if "Optimized" in mode:
+        band = assign_risk_band_optimized(np.array([prob]), threshold)[0]
+    else:
+        band = assign_risk_band(np.array([prob]))[0]
+        
+    return {"prob": prob, "band": band, "flag": int(prob >= threshold)}
 
 def render_risk_badge(band: str) -> str:
-    css = {"Low": "badge-low", "Medium": "badge-medium", "High": "badge-high"}
-    cls = css.get(band, "badge-medium")
+    cls = {"Low": "badge-low", "Medium": "badge-medium", "High": "badge-high"}.get(band, "badge-medium")
     return f'<span class="badge {cls}">{band.upper()} RISK</span>'
 
-
-def render_prob_bar(prob: float) -> str:
-    pct = max(0.0, min(100.0, prob * 100.0))
-    if prob < 0.40:
-        colour = "#10b981"
-    elif prob < 0.70:
-        colour = "#f59e0b"
-    else:
-        colour = "#ef4444"
-
-    return f"""
-    <div class="prob-bar-outer">
-      <div class="prob-bar-inner" style="width:{pct:.1f}%; background:{colour};"></div>
-    </div>
-    """
-
-
 # ──────────────────────────────────────────────────────────────────────────────
-# App layout
+# App Header
 # ──────────────────────────────────────────────────────────────────────────────
-
-# ── Header ───────────────────────────────────────────────────────────────────
 st.markdown(
     f"""
-    <div style='text-align:center; padding: 24px 0 8px 0;'>
-      <h1 style='font-size:2.4rem; font-weight:800;
-                 background:linear-gradient(135deg,#3b82f6,#8b5cf6);
-                 -webkit-background-clip:text; -webkit-text-fill-color:transparent;'>
+    <div style='text-align:center; padding-bottom: 20px;'>
+      <h1 style='background:linear-gradient(135deg,#3b82f6,#8b5cf6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; font-size:2.5rem;'>
         🏦 Bank Customer Churn Risk Scorer
       </h1>
-      <p style='color:#94a3b8; font-size:1rem; margin-top:-6px;'>
-        v{APP_VERSION} &nbsp;·&nbsp; Powered by Gradient Boosting &nbsp;·&nbsp; Predictive ML Pipeline
-      </p>
+      <p style='color:#94a3b8;'>v{APP_VERSION} &nbsp;·&nbsp; Enterprise ML Dashboard</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-# Model not loaded guard
-if pipeline is None:
-    st.error(
-        "⚠️  Model not found at **models/model.pkl**. "
-        "Please run `python src/train.py` first.",
-        icon="🚫",
-    )
-    st.stop()
-elif pipeline == "NO_PROBA":
-    st.error(
-        "⚠️  Loaded model does not support probability predictions (`predict_proba`). "
-        "Please ensure the pipeline includes a supported classifier.",
-        icon="🚫",
-    )
+# Fail fast checks
+if load_error:
+    st.error(f"🚫 {load_error}")
     st.stop()
 
-# ── Sidebar – threshold picker ───────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# Sidebar Settings
+# ──────────────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## ⚙️ Settings")
+    st.markdown("### ⚙️ Dashboard Settings")
     st.markdown("---")
-    threshold_mode = st.radio(
-        "Decision Threshold",
-        ["F1-Optimized", "Recall-Priority (≥0.80)", "Custom"],
-        help="Choose which threshold to use for the churn flag.",
-    )
+    
+    threshold_mode = st.radio("Decision Threshold", ["F1-Optimized", "Recall-Priority", "Custom"])
     if threshold_mode == "F1-Optimized":
         active_threshold = BEST_THRESH_F1
-    elif threshold_mode == "Recall-Priority (≥0.80)":
+    elif threshold_mode == "Recall-Priority":
         active_threshold = BEST_THRESH_RECALL
     else:
-        active_threshold = st.slider(
-            "Custom Threshold", 0.10, 0.90, float(BEST_THRESH_F1), 0.01
-        )
+        active_threshold = st.slider("Custom Threshold", 0.0, 1.0, 0.50, 0.01)
 
-    st.markdown(
-        f'<div class="info-box">Active threshold: <b>{active_threshold:.3f}</b></div>',
-        unsafe_allow_html=True,
-    )
+    risk_band_mode = st.selectbox("Risk Banding Mode", ["Fixed (0.40/0.70)", "Optimized (Uses Threshold)"])
+    
     st.markdown("---")
-    st.markdown("### 📊 Threshold Info")
-    st.markdown(
-        f"- **F1-Optimal**: `{BEST_THRESH_F1:.3f}`\n"
-        f"- **Recall ≥ 0.80**: `{BEST_THRESH_RECALL:.3f}`"
-    )
-    st.markdown("---")
-    st.markdown("### 🚦 Risk Banding")
-    risk_band_mode = st.radio(
-        "Risk Band Mode",
-        ["Fixed (0.40 / 0.70)", "Optimized (Uses Threshold)"],
-        help="Fixed uses static 0.40 and 0.70 cutoffs. Optimized aligns the 'High' band precisely with your chosen threshold.",
-    )
-    if risk_band_mode == "Fixed (0.40 / 0.70)":
-        st.markdown(
-            "| Band | Probability |\n"
-            "|------|-------------|\n"
-            "| 🟢 Low    | < 0.40 |\n"
-            "| 🟡 Medium | 0.40 – 0.70 |\n"
-            "| 🔴 High   | ≥ 0.70 |"
-        )
-    else:
-        st.markdown(
-            "| Band | Probability |\n"
-            "|------|-------------|\n"
-            f"| 🟢 Low    | < {active_threshold/2:.2f} |\n"
-            f"| 🟡 Medium | {active_threshold/2:.2f} – {active_threshold:.2f} |\n"
-            f"| 🔴 High   | ≥ {active_threshold:.2f} |"
-        )
-
-    st.markdown("---")
-    st.markdown("### 📝 Audit Logging")
-    enable_logging = st.checkbox(
-        "Enable audit logging", 
-        value=True, 
-        help="Record all predictions to logs/predictions.csv for traceability."
-    )
+    st.markdown("### 📝 Audit Control")
+    enable_logging = st.checkbox("Enable audit logging", value=True)
     
     log_file = LOG_DIR / "predictions.csv"
     if log_file.exists():
         with open(log_file, "rb") as f:
-            st.download_button(
-                "📥 Download Prediction Logs",
-                data=f,
-                file_name="prediction_audit_log.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+            st.download_button("📥 Download Logs (CSV)", data=f, file_name="churn_audit_logs.csv", mime="text/csv")
 
-# ── Main panel ───────────────────────────────────────────────────────────────
-tab1, tab2, tab3 = st.tabs(["🔍  Customer Prediction", "🔄  What-If Simulator", "🧠  Model Explainability"])
+# ──────────────────────────────────────────────────────────────────────────────
+# Main UI
+# ──────────────────────────────────────────────────────────────────────────────
+tab1, tab2, tab3 = st.tabs(["🔍 Prediction", "🔄 What-If Simulator", "🧠 Explainability"])
 
-# ═════════════════════════════════════════════════════════════════════════════
-# TAB 1 – Customer Prediction
-# ═════════════════════════════════════════════════════════════════════════════
 with tab1:
-    st.markdown('<p class="section-header">Enter Customer Details</p>', unsafe_allow_html=True)
-
+    st.markdown("### 👤 Customer Profile")
     col1, col2, col3 = st.columns(3)
-
+    
     with col1:
-        st.markdown("**📋 Account Information**")
-        credit_score = st.number_input(
-            "Credit Score", min_value=300, max_value=850, value=650, step=1,
-            help="Customer credit score (300–850)",
-            key="cs_main",
-        )
-        geography = st.selectbox(
-            "Geography", ["France", "Spain", "Germany"], key="geo_main"
-        )
-        gender = st.selectbox(
-            "Gender", ["Female", "Male"], key="gender_main"
-        )
+        st.markdown("**Core Info**")
+        cs = st.number_input("Credit Score", 300, 850, 650, key="cs_main")
+        geo = st.selectbox("Geography", ["France", "Germany", "Spain"], key="geo_main")
+        gen = st.selectbox("Gender", ["Female", "Male"], key="gen_main")
+        age = st.number_input("Age", 18, 100, 40, key="age_main")
 
     with col2:
-        st.markdown("**📅 Customer Profile**")
-        age = st.number_input(
-            "Age", min_value=18, max_value=100, value=40, step=1, key="age_main"
-        )
-        tenure = st.number_input(
-            "Tenure (years)", min_value=0, max_value=20, value=5, step=1, key="tenure_main"
-        )
-        num_products = st.number_input(
-            "Number of Products", min_value=1, max_value=4, value=1, step=1, key="nop_main"
-        )
+        st.markdown("**Activity**")
+        ten = st.number_input("Tenure (Years)", 0, 20, 5, key="ten_main")
+        nop = st.number_input("Number of Products", 1, 4, 1, key="nop_main")
+        hcc = st.selectbox("Has Credit Card", [0, 1], format_func=lambda x: "Yes" if x else "No", key="hcc_main")
+        iam = st.selectbox("Is Active Member", [0, 1], format_func=lambda x: "Yes" if x else "No", key="iam_main")
 
     with col3:
-        st.markdown("**💰 Financial Details**")
-        balance = st.number_input(
-            "Account Balance (€)", min_value=0.0, max_value=300_000.0,
-            value=75_000.0, step=500.0, format="%.2f", key="bal_main"
-        )
-        salary = st.number_input(
-            "Estimated Salary (€)", min_value=0.0, max_value=300_000.0,
-            value=100_000.0, step=500.0, format="%.2f", key="sal_main"
-        )
-        has_cr_card  = st.selectbox(
-            "Has Credit Card", [0, 1],
-            format_func=lambda x: "✅ Yes" if x else "❌ No", key="hcc_main"
-        )
-        is_active    = st.selectbox(
-            "Is Active Member", [0, 1],
-            format_func=lambda x: "✅ Yes" if x else "❌ No", key="iam_main"
-        )
+        st.markdown("**Financials**")
+        bal = st.number_input("Balance (€)", 0.0, 300000.0, 75000.0, step=500.0, key="bal_main")
+        sal = st.number_input("Estimated Salary (€)", 0.0, 300000.0, 100000.0, step=500.0, key="sal_main")
 
-    st.markdown("---")
-    
-    # Input validation / sanity hint
-    if balance > 150_000 and salary < 30_000:
-        st.warning("⚠️ **Data Sanity Hint:** The account balance is unusually high compared to the estimated salary. Please verify the inputs.")
-        
-    predict_btn = st.button("🚀  Predict Churn Risk", use_container_width=True)
+    predict_btn = st.button("🚀 Run Prediction", use_container_width=True)
 
     if predict_btn:
-        result = score_customer(
-            credit_score, geography, gender, age, tenure,
-            balance, num_products, has_cr_card, is_active, salary,
-            threshold=active_threshold,
-            risk_band_mode=risk_band_mode,
-        )
-        prob = result["prob"]
-        band = result["band"]
-        flag = result["flag"]
+        input_data = {
+            "CreditScore": cs, "Geography": geo, "Gender": gen, "Age": age,
+            "Tenure": ten, "Balance": bal, "NumOfProducts": nop,
+            "HasCrCard": int(hcc), "IsActiveMember": int(iam), "EstimatedSalary": sal
+        }
+        res = score_customer(input_data, active_threshold, risk_band_mode)
+        st.session_state["last_res"] = res
+        st.session_state["last_input"] = input_data
 
-        # Audit Logging
+        # Results Display
+        st.markdown("---")
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Churn Probability", f"{res['prob']*100:.1f}%")
+        r2.metric("Decision", "⚠️ CHURN" if res['flag'] else "✅ RETAIN")
+        r3.metric("Risk Band", res['band'])
+        
+        st.markdown(f"<div style='text-align:center;'>{render_risk_badge(res['band'])}</div>", unsafe_allow_html=True)
+
         if enable_logging:
             LOG_DIR.mkdir(exist_ok=True)
-            log_exists = log_file.exists()
-            with open(log_file, mode="a", newline="", encoding="utf-8") as f:
+            exists = log_file.exists()
+            with open(log_file, "a", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
-                if not log_exists:
-                    writer.writerow([
-                        "Timestamp", "CreditScore", "Geography", "Gender", "Age", 
-                        "Tenure", "Balance", "NumOfProducts", "HasCrCard", 
-                        "IsActiveMember", "EstimatedSalary", "Probability", 
-                        "Threshold", "RiskBand", "ChurnFlag", "BandingMode"
-                    ])
-                writer.writerow([
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    credit_score, geography, gender, age, tenure, balance, 
-                    num_products, has_cr_card, is_active, salary, 
-                    round(prob, 4), round(active_threshold, 4), 
-                    band, flag, risk_band_mode
-                ])
+                if not exists:
+                    writer.writerow(["Timestamp"] + list(input_data.keys()) + ["Threshold", "BandingMode", "Prob", "Band", "Flag"])
+                writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S")] + list(input_data.values()) + [active_threshold, risk_band_mode, res['prob'], res['band'], res['flag']])
 
-        st.markdown("---")
-        st.markdown("### 📈 Prediction Results")
-
-        r1, r2, r3 = st.columns(3)
-        r1.metric("Churn Probability", f"{prob*100:.1f}%")
-        r2.metric("Churn Decision",    "⚠️ CHURN" if flag else "✅ RETAIN")
-        r3.metric("Threshold Used",    f"{active_threshold:.3f}")
-
-        # Risk badge
-        st.markdown(
-            f"**Risk Classification:** {render_risk_badge(band)}",
-            unsafe_allow_html=True,
-        )
-
-        # Probability bar
-        st.markdown(
-            f"**Churn Probability Bar**{render_prob_bar(prob)}",
-            unsafe_allow_html=True,
-        )
-
-        # Narrative explanation
-        st.markdown("---")
-        st.markdown("#### 🔍 Interpretation")
-        if band == "Low":
-            narrative = (
-                f"This customer has a **{prob*100:.1f}%** churn probability — "
-                "classified as **Low Risk**. Standard engagement is appropriate. "
-                "No immediate retention action required."
-            )
-        elif band == "Medium":
-            narrative = (
-                f"This customer has a **{prob*100:.1f}%** churn probability — "
-                "classified as **Medium Risk**. Consider proactive outreach: "
-                "personalised offers, loyalty programme enrolment, or a check-in call."
-            )
-        else:
-            narrative = (
-                f"This customer has a **{prob*100:.1f}%** churn probability — "
-                "classified as **High Risk** ⚠️. Immediate intervention recommended: "
-                "dedicated retention specialist contact, premium product upgrade offer, "
-                "or fee waiver for the next billing period."
-            )
-        st.info(narrative)
-
-        # Export result
-        st.markdown("---")
-        export_data = {
-            "CreditScore": credit_score,
-            "Geography": geography,
-            "Gender": gender,
-            "Age": age,
-            "Tenure": tenure,
-            "Balance": balance,
-            "NumOfProducts": num_products,
-            "HasCrCard": has_cr_card,
-            "IsActiveMember": is_active,
-            "EstimatedSalary": salary,
-            "ChurnProbability": round(prob, 4),
-            "RiskBand": band,
-            "ChurnFlag": bool(flag)
-        }
-        st.download_button(
-            label="📥 Download Executive Summary (JSON)",
-            data=json.dumps(export_data, indent=2),
-            file_name="churn_prediction_summary.json",
-            mime="application/json",
-            use_container_width=True
-        )
-
-# ═════════════════════════════════════════════════════════════════════════════
-# TAB 2 – What-If Simulator
-# ═════════════════════════════════════════════════════════════════════════════
 with tab2:
     st.markdown("### 🔄 What-If Simulator")
-    st.markdown(
-        '<div class="info-box">'
-        "Adjust key levers to instantly see how interventions affect churn probability. "
-        "The baseline is automatically synced with your inputs from the Prediction tab."
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    st.info("Baseline profile is synced from Tab 1. Adjust levers below to see the impact.")
+    
+    # Baseline from Tab 1 keys
+    base_iam = st.session_state.get("iam_main", 1)
+    base_nop = st.session_state.get("nop_main", 1)
+    base_bal = st.session_state.get("bal_main", 75000.0)
 
-    wif_col1, wif_col2 = st.columns([1, 1])
+    sc1, sc2 = st.columns(2)
+    with sc1:
+        st.markdown("**Intervention Levers**")
+        sim_iam = st.selectbox("Simulated Active Status", [0, 1], index=int(base_iam), format_func=lambda x: "Active" if x else "Inactive", key="sim_iam")
+        sim_nop = st.number_input("Simulated Products", 1, 4, int(base_nop), key="sim_nop")
+        sim_bal = st.number_input("Simulated Balance (€)", 0.0, 300000.0, float(base_bal), step=1000.0, key="sim_bal")
 
-    with wif_col1:
-        st.markdown("**📋 Baseline Profile (from Prediction tab)**")
-        # Display baseline values for context
-        st.markdown(f"- **Geography:** {geography}")
-        st.markdown(f"- **Age:** {age}")
-        st.markdown(f"- **Credit Score:** {credit_score}")
-        st.markdown(f"- **Salary:** €{salary:,.2f}")
-        st.markdown("---")
-        st.markdown("**Current State of Levers:**")
-        st.markdown(f"- **Active Member:** {'✅ Yes' if is_active else '❌ No'}")
-        st.markdown(f"- **Number of Products:** {num_products}")
-        st.markdown(f"- **Account Balance:** €{balance:,.2f}")
+    with sc2:
+        st.markdown("**Intervention Impact**")
+        # Build base and sim data
+        base_data = {
+            "CreditScore": st.session_state.get("cs_main", 650), "Geography": st.session_state.get("geo_main", "France"),
+            "Gender": st.session_state.get("gen_main", "Female"), "Age": st.session_state.get("age_main", 40),
+            "Tenure": st.session_state.get("ten_main", 5), "Balance": base_bal, "NumOfProducts": base_nop,
+            "HasCrCard": st.session_state.get("hcc_main", 1), "IsActiveMember": base_iam, "EstimatedSalary": st.session_state.get("sal_main", 100000.0)
+        }
+        sim_data = base_data.copy()
+        sim_data.update({"IsActiveMember": sim_iam, "NumOfProducts": sim_nop, "Balance": sim_bal})
 
-    with wif_col2:
-        st.markdown("**🎚️ Simulate Interventions**")
-        st.markdown(
-            "_Adjust the 3 most actionable levers below and compare the outcome:_"
-        )
+        if st.button("⚡ Calculate Delta", use_container_width=True):
+            r_base = score_customer(base_data, active_threshold, risk_band_mode)
+            r_sim  = score_customer(sim_data, active_threshold, risk_band_mode)
+            
+            delta = (r_sim['prob'] - r_base['prob']) * 100
+            st.metric("New Probability", f"{r_sim['prob']*100:.1f}%", delta=f"{delta:+.1f}%", delta_color="inverse")
+            st.write(f"Risk Band: **{r_base['band']}** → **{r_sim['band']}**")
 
-        wif_active_sim = st.selectbox(
-            "Is Active Member (after intervention)", [0, 1],
-            format_func=lambda x: "✅ Yes (Active)" if x else "❌ No (Inactive)",
-            index=is_active,       
-            key="iam_wif_sim",
-            help="Activating a member is the single biggest lever in most churn models.",
-        )
-        wif_nop_sim = st.number_input(
-            "Num of Products (after cross-sell)", 1, 4, 
-            value=num_products,
-            key="nop_wif_sim",
-            help="Customers with 2 products churn far less.",
-        )
-        wif_balance_sim = st.number_input(
-            "Balance (€) after deposit / offer", 0.0, 300_000.0,
-            value=balance,
-            step=500.0, format="%.2f",
-            key="bal_wif_sim",
-        )
-
-        st.markdown("---")
-        if st.button("⚡  Run Simulation", use_container_width=True):
-            # Score baseline using Prediction tab values
-            base_res = score_customer(
-                credit_score, geography, gender, age, tenure,
-                balance, num_products, has_cr_card, is_active, salary,
-                threshold=active_threshold,
-                risk_band_mode=risk_band_mode,
-            )
-            # Score simulated using adjusted values
-            sim_res = score_customer(
-                credit_score, geography, gender, age, tenure,
-                wif_balance_sim, wif_nop_sim, has_cr_card, wif_active_sim, salary,
-                threshold=active_threshold,
-                risk_band_mode=risk_band_mode,
-            )
-
-            delta_prob = sim_res["prob"] - base_res["prob"]
-            delta_pct  = delta_prob * 100
-
-            st.markdown("#### 📊 Simulation Results")
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Baseline Probability", f"{base_res['prob']*100:.1f}%")
-            c2.metric(
-                "Simulated Probability",
-                f"{sim_res['prob']*100:.1f}%",
-                delta=f"{delta_pct:+.1f}%",
-                delta_color="inverse",
-            )
-            c3.metric(
-                "Risk Band Change",
-                f"{base_res['band']} → {sim_res['band']}",
-            )
-
-            # Comparison table
-            comparison = pd.DataFrame({
-                "Scenario":            ["Baseline", "Simulated"],
-                "IsActiveMember":      [is_active, wif_active_sim],
-                "NumOfProducts":       [num_products, wif_nop_sim],
-                "Balance (€)":         [balance, wif_balance_sim],
-                "Churn Probability":   [
-                    f"{base_res['prob']*100:.1f}%",
-                    f"{sim_res['prob']*100:.1f}%",
-                ],
-                "Risk Band":           [base_res["band"], sim_res["band"]],
-                "Churn Flag":          [
-                    "Churn" if base_res["flag"] else "Retain",
-                    "Churn" if sim_res["flag"]  else "Retain",
-                ],
-            })
-            st.table(comparison.set_index("Scenario"))
-
-            # Narrative
-            if delta_pct < -5:
-                st.success(
-                    f"✅ The simulated interventions reduce churn probability by "
-                    f"**{abs(delta_pct):.1f} percentage points** — "
-                    "a meaningful improvement in retention likelihood."
-                )
-            elif delta_pct > 5:
-                st.warning(
-                    f"⚠️ The simulated changes **increase** churn probability by "
-                    f"**{delta_pct:.1f}pp**. Review the adjustments."
-                )
-            else:
-                st.info(
-                    "ℹ️ The interventions have a modest effect (<5pp change). "
-                    "Consider stronger or combined actions."
-                )
-
-# ═════════════════════════════════════════════════════════════════════════════
-# TAB 3 – Model Explainability
-# ═════════════════════════════════════════════════════════════════════════════
 with tab3:
     st.markdown("### 🧠 Model Explainability")
-    st.markdown(
-        '<div class="info-box">'
-        "Understand which factors drive the model's predictions globally, and locally for the current customer."
-        "</div>",
-        unsafe_allow_html=True,
-    )
-    
-    st.markdown("#### 🌍 Global Feature Importance")
-    fi_path = PROJECT_ROOT / "outputs" / "feature_importance.png"
-    if fi_path.exists():
-        st.image(str(fi_path), caption="Global Feature Importance (Gradient Boosting)", use_container_width=True)
+    if "last_input" not in st.session_state:
+        st.info("Run a prediction in Tab 1 first to see explanations.")
     else:
-        st.info("Feature importance plot not found. Ensure models have been trained and evaluated.")
-
-    st.markdown("---")
-    st.markdown("#### 👤 Local Explanation (Current Customer)")
-    
-    if pipeline is not None and pipeline != "NO_PROBA":
         try:
             import shap
             
-            # The current state of the widgets from Tab 1
-            current_row = pd.DataFrame([{
-                "CreditScore":      credit_score,
-                "Geography":        geography,
-                "Gender":           gender,
-                "Age":              age,
-                "Tenure":           tenure,
-                "Balance":          balance,
-                "NumOfProducts":    num_products,
-                "HasCrCard":        int(has_cr_card),
-                "IsActiveMember":   int(is_active),
-                "EstimatedSalary":  salary,
-            }])
-            
+            # Extract models
             preprocessor = pipeline.named_steps["preprocessor"]
             classifier = pipeline.named_steps["classifier"]
-            X_transformed = preprocessor.transform(current_row)
             
-            tree_models = ("GradientBoostingClassifier", "RandomForestClassifier", "DecisionTreeClassifier", "XGBClassifier", "LGBMClassifier")
-            model_type = type(classifier).__name__
+            # Prepare row
+            row_df = pd.DataFrame([st.session_state["last_input"]])
+            if hasattr(pipeline, "feature_names_in_"):
+                row_df = row_df[list(pipeline.feature_names_in_)]
             
-            if model_type in tree_models:
-                # TreeExplainer is fast for tree-based models
-                explainer = shap.TreeExplainer(classifier)
-                shap_values = explainer.shap_values(X_transformed)
-                
-                # Handle binary classification lists
-                if isinstance(shap_values, list):
-                    sv = shap_values[1][0]
-                else:
-                    sv = shap_values[0]
-                    
-                # Get feature names
-                if hasattr(preprocessor, "get_feature_names_out"):
-                    feature_names = preprocessor.get_feature_names_out()
-                else:
-                    feature_names = [f"Feature {i}" for i in range(X_transformed.shape[1])]
-                
-                # Build a robust dark-themed horizontal bar plot
-                fig, ax = plt.subplots(figsize=(8, 5))
-                idx = np.argsort(np.abs(sv))
-                colors = ['#ef4444' if val > 0 else '#10b981' for val in sv[idx]]
-                
-                ax.barh(np.array(feature_names)[idx], sv[idx], color=colors)
-                ax.set_xlabel("SHAP Value (Impact on Churn Probability Log-Odds)")
-                ax.set_title(f"Why did this customer get this score? ({model_type})")
-                
-                # Apply dark theme formatting
-                fig.patch.set_facecolor('#1e293b')
-                ax.set_facecolor('#1e293b')
-                ax.xaxis.label.set_color('#f1f5f9')
-                ax.yaxis.label.set_color('#f1f5f9')
-                ax.title.set_color('#f1f5f9')
-                ax.tick_params(colors='#94a3b8')
-                for spine in ax.spines.values():
-                    spine.set_color('#334155')
-                    
-                st.pyplot(fig)
-                plt.close(fig)
-                
-                st.markdown(
-                    "<small><i>Red bars increase churn risk, green bars decrease churn risk. "
-                    "Longer bars have a stronger impact.</i></small>",
-                    unsafe_allow_html=True
-                )
-            else:
-                st.info(f"Local explanations via SHAP are currently optimized for tree-based models. "
-                        f"Current model: `{model_type}`.")
-                
+            X_tx = preprocessor.transform(row_df)
+            feat_names = preprocessor.get_feature_names_out()
+            
+            explainer = shap.TreeExplainer(classifier)
+            shap_values = explainer.shap_values(X_tx)
+            
+            # Handle binary output shape
+            sv = shap_values[1][0] if isinstance(shap_values, list) else shap_values[0]
+            
+            fig, ax = plt.subplots(figsize=(8, 5))
+            idx = np.argsort(np.abs(sv))
+            colors = ['#ef4444' if v > 0 else '#10b981' for v in sv[idx]]
+            ax.barh(feat_names[idx], sv[idx], color=colors)
+            ax.set_title("Feature Contribution to Churn Risk (SHAP)")
+            ax.set_xlabel("Impact (SHAP Value)")
+            
+            # Dark theme styling
+            fig.patch.set_facecolor('#1e293b')
+            ax.set_facecolor('#1e293b')
+            ax.xaxis.label.set_color('#f1f5f9'); ax.yaxis.label.set_color('#f1f5f9')
+            ax.title.set_color('#f1f5f9'); ax.tick_params(colors='#94a3b8')
+            for s in ax.spines.values(): s.set_color('#334155')
+            
+            st.pyplot(fig)
+            st.caption("Red bars increase churn risk, green bars decrease it.")
+            
         except ImportError:
-            st.warning("⚠️ `shap` library not found. Please add `shap` to your requirements to see local explanations.")
+            st.warning("⚠️ SHAP library not found. Install it via `pip install shap` to see feature explanations.")
         except Exception as e:
-            st.warning(f"⚠️ Could not generate local SHAP explanation: {e}")
-    else:
-        st.warning("Model not loaded properly.")
+            st.info(f"Local explanations via SHAP are currently optimized for tree-based models. ({e})")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown(
-    "<p style='text-align:center;color:#475569;font-size:0.8rem;'>"
-    "Bank Customer Churn Risk Scorer · Gradient Boosting Pipeline · "
-    "Built with scikit-learn & Streamlit"
-    "</p>",
-    unsafe_allow_html=True,
-)
+st.markdown("<p style='text-align:center; color:#475569;'>Bank Churn Scorer v2.0.0 · Built with Scikit-Learn & Streamlit</p>", unsafe_allow_html=True)
