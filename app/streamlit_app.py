@@ -32,7 +32,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from utils import assign_risk_band, assign_risk_band_optimized  # noqa: E402
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "2.0.0"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Page configuration
@@ -171,6 +171,9 @@ def load_model():
         return None, None, None
 
     pipeline = joblib.load(model_path)
+    
+    if not hasattr(pipeline, "predict_proba"):
+        return "NO_PROBA", None, None
 
     best_f1 = 0.50
     best_recall = 0.50
@@ -203,6 +206,9 @@ def score_customer(
     risk_band_mode: str = "Fixed (0.40 / 0.70)",
 ) -> dict:
     """Build feature dict, run through pipeline, return result dict."""
+    if pipeline is None or pipeline == "NO_PROBA" or not hasattr(pipeline, "predict_proba"):
+        return {"prob": 0.0, "band": "Unknown", "flag": 0}
+
     if threshold is None:
         threshold = BEST_THRESH_F1
 
@@ -279,6 +285,13 @@ if pipeline is None:
     st.error(
         "⚠️  Model not found at **models/model.pkl**. "
         "Please run `python src/train.py` first.",
+        icon="🚫",
+    )
+    st.stop()
+elif pipeline == "NO_PROBA":
+    st.error(
+        "⚠️  Loaded model does not support probability predictions (`predict_proba`). "
+        "Please ensure the pipeline includes a supported classifier.",
         icon="🚫",
     )
     st.stop()
