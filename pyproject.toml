@@ -1,0 +1,19 @@
+[project]
+name = "bank-churn-prediction"
+version = "2.0.0"
+description = "Predictive Modeling and Risk Scoring for Bank Customer Churn"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "scikit-learn>=1.3.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "matplotlib>=3.7.0",
+    "joblib>=1.3.0",
+    "streamlit>=1.32.0",
+    "shap>=0.40.0"
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

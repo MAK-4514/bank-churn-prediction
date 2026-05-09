@@ -33,7 +33,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from utils import assign_risk_band, assign_risk_band_optimized  # noqa: E402
 
-APP_VERSION = "2.0.0"
+from version import __version__ as APP_VERSION
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Page configuration
