@@ -1,0 +1,28 @@
+{
+    "logistic_regression": {
+        "model": "Logistic Regression",
+        "threshold": 0.5812562814070352,
+        "accuracy": 0.77,
+        "precision": 0.45083487940630795,
+        "recall": 0.597051597051597,
+        "f1": 0.5137420718816068,
+        "roc_auc": 0.7771654551315569,
+        "threshold_f1_optimized": 0.5812562814070352,
+        "threshold_recall_priority": 0.4335175879396985,
+        "precision_at_recall_thresh": 0.3486140724946695,
+        "recall_at_recall_thresh": 0.8034398034398035
+    },
+    "gradient_boosting": {
+        "model": "Gradient Boosting",
+        "threshold": 0.33994974874371864,
+        "accuracy": 0.8595,
+        "precision": 0.6657894736842105,
+        "recall": 0.6216216216216216,
+        "f1": 0.6429479034307497,
+        "roc_auc": 0.8704258958496245,
+        "threshold_f1_optimized": 0.33994974874371864,
+        "threshold_recall_priority": 0.16758793969849248,
+        "precision_at_recall_thresh": 0.4521497919556172,
+        "recall_at_recall_thresh": 0.800982800982801
+    }
+}

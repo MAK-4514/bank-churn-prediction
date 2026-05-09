@@ -1,0 +1,26 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Data and Models
+data/*.csv
+models/*.pkl
+
+# Ignore outputs (metrics, plots)
+# outputs/
+# (Actually, let's keep outputs so people can see the plots in the repo, but let's ignore large data)
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
