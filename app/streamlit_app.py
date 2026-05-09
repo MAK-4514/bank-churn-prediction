@@ -162,16 +162,32 @@ hr { border-color: var(--border) !important; }
 
 @st.cache_resource(show_spinner="Loading model…")
 def load_model():
-    model_path     = PROJECT_ROOT / "models" / "model.pkl"
+    model_path = PROJECT_ROOT / "models" / "model.pkl"
     threshold_path = PROJECT_ROOT / "models" / "best_threshold.json"
 
     if not model_path.exists():
         return None, None, None
 
     pipeline = joblib.load(model_path)
-    with open(threshold_path) as f:
-        cfg = json.load(f)
-    return pipeline, cfg["best_threshold_f1"], cfg["best_threshold_recall"]
+
+    best_f1 = None
+    best_recall = None
+    if threshold_path.exists():
+        try:
+            with open(threshold_path) as f:
+                cfg = json.load(f)
+            best_f1 = float(cfg.get("best_threshold_f1")) if cfg.get("best_threshold_f1") is not None else None
+            best_recall = float(cfg.get("best_threshold_recall")) if cfg.get("best_threshold_recall") is not None else None
+        except Exception:
+            best_f1, best_recall = None, None
+
+    # Safe defaults if json missing
+    if best_f1 is None:
+        best_f1 = 0.50
+    if best_recall is None:
+        best_recall = best_f1
+
+    return pipeline, best_f1, best_recall
 
 
 pipeline, BEST_THRESH_F1, BEST_THRESH_RECALL = load_model()
@@ -184,6 +200,7 @@ def score_customer(
     credit_score, geography, gender, age, tenure,
     balance, num_products, has_cr_card, is_active, salary,
     threshold: float = None,
+    risk_band_mode: str = "Fixed (0.40 / 0.70)",
 ) -> dict:
     """Build feature dict, run through pipeline, return result dict."""
     if threshold is None:
@@ -203,7 +220,12 @@ def score_customer(
     }])
 
     prob  = float(pipeline.predict_proba(row)[0, 1])
-    band  = str(assign_risk_band(np.array([prob]))[0])
+    
+    if risk_band_mode == "Optimized (Uses Threshold)":
+        band = str(assign_risk_band_optimized(np.array([prob]), threshold)[0])
+    else:
+        band = str(assign_risk_band(np.array([prob]))[0])
+        
     flag  = int(prob >= threshold)
 
     return {"prob": prob, "band": band, "flag": flag}
@@ -211,22 +233,24 @@ def score_customer(
 
 def render_risk_badge(band: str) -> str:
     css = {"Low": "badge-low", "Medium": "badge-medium", "High": "badge-high"}
-    return f'<span class="badge {css[band]}">{band} Risk</span>'
+    cls = css.get(band, "badge-medium")
+    return f'<span class="badge {cls}">{band.upper()} RISK</span>'
 
 
 def render_prob_bar(prob: float) -> str:
-    pct = prob * 100
+    pct = max(0.0, min(100.0, prob * 100.0))
     if prob < 0.40:
         colour = "#10b981"
     elif prob < 0.70:
         colour = "#f59e0b"
     else:
         colour = "#ef4444"
-    return (
-        f'<div class="prob-bar-outer">'
-        f'<div class="prob-bar-inner" style="width:{pct:.1f}%;background:{colour};"></div>'
-        f'</div>'
-    )
+
+    return f"""
+    <div class="prob-bar-outer">
+      <div class="prob-bar-inner" style="width:{pct:.1f}%; background:{colour};"></div>
+    </div>
+    """
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -288,14 +312,28 @@ with st.sidebar:
         f"- **Recall ≥ 0.80**: `{BEST_THRESH_RECALL:.3f}`"
     )
     st.markdown("---")
-    st.markdown(
-        "### Risk Bands\n"
-        "| Band | Probability |\n"
-        "|------|-------------|\n"
-        "| 🟢 Low    | < 0.40 |\n"
-        "| 🟡 Medium | 0.40 – 0.70 |\n"
-        "| 🔴 High   | ≥ 0.70 |"
+    st.markdown("### 🚦 Risk Banding")
+    risk_band_mode = st.radio(
+        "Risk Band Mode",
+        ["Fixed (0.40 / 0.70)", "Optimized (Uses Threshold)"],
+        help="Fixed uses static 0.40 and 0.70 cutoffs. Optimized aligns the 'High' band precisely with your chosen threshold.",
     )
+    if risk_band_mode == "Fixed (0.40 / 0.70)":
+        st.markdown(
+            "| Band | Probability |\n"
+            "|------|-------------|\n"
+            "| 🟢 Low    | < 0.40 |\n"
+            "| 🟡 Medium | 0.40 – 0.70 |\n"
+            "| 🔴 High   | ≥ 0.70 |"
+        )
+    else:
+        st.markdown(
+            "| Band | Probability |\n"
+            "|------|-------------|\n"
+            f"| 🟢 Low    | < {active_threshold/2:.2f} |\n"
+            f"| 🟡 Medium | {active_threshold/2:.2f} – {active_threshold:.2f} |\n"
+            f"| 🔴 High   | ≥ {active_threshold:.2f} |"
+        )
 
 # ── Main panel ───────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["🔍  Customer Prediction", "🔄  What-If Simulator"])
@@ -361,6 +399,7 @@ with tab1:
             credit_score, geography, gender, age, tenure,
             balance, num_products, has_cr_card, is_active, salary,
             threshold=active_threshold,
+            risk_band_mode=risk_band_mode,
         )
         prob = result["prob"]
         band = result["band"]
@@ -489,6 +528,7 @@ with tab2:
                 wif_age, wif_tenure, wif_balance, wif_nop,
                 wif_hcc, wif_active, wif_salary,
                 threshold=active_threshold,
+                risk_band_mode=risk_band_mode,
             )
             # Score simulated
             sim_res = score_customer(
@@ -496,6 +536,7 @@ with tab2:
                 wif_age, wif_tenure, wif_balance_sim, wif_nop_sim,
                 wif_hcc, wif_active_sim, wif_salary,
                 threshold=active_threshold,
+                risk_band_mode=risk_band_mode,
             )
 
             delta_prob = sim_res["prob"] - base_res["prob"]
