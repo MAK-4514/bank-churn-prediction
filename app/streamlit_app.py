@@ -32,6 +32,8 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from utils import assign_risk_band, assign_risk_band_optimized  # noqa: E402
 
+APP_VERSION = "1.1.0"
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Page configuration
 # ──────────────────────────────────────────────────────────────────────────────
@@ -257,7 +259,7 @@ def render_prob_bar(prob: float) -> str:
 
 # ── Header ───────────────────────────────────────────────────────────────────
 st.markdown(
-    """
+    f"""
     <div style='text-align:center; padding: 24px 0 8px 0;'>
       <h1 style='font-size:2.4rem; font-weight:800;
                  background:linear-gradient(135deg,#3b82f6,#8b5cf6);
@@ -265,7 +267,7 @@ st.markdown(
         🏦 Bank Customer Churn Risk Scorer
       </h1>
       <p style='color:#94a3b8; font-size:1rem; margin-top:-6px;'>
-        Powered by Gradient Boosting &nbsp;·&nbsp; Predictive ML Pipeline
+        v{APP_VERSION} &nbsp;·&nbsp; Powered by Gradient Boosting &nbsp;·&nbsp; Predictive ML Pipeline
       </p>
     </div>
     """,
