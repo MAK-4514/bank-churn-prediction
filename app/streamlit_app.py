@@ -246,11 +246,11 @@ def render_prob_bar(prob: float) -> str:
     else:
         colour = "#ef4444"
 
-    return f"""
-    <div class="prob-bar-outer">
-      <div class="prob-bar-inner" style="width:{pct:.1f}%; background:{colour};"></div>
-    </div>
-    """
+    return (
+        f'<div class="prob-bar-outer">'
+        f'<div class="prob-bar-inner" style="width:{pct:.1f}%; background:{colour};"></div>'
+        f'</div>'
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────────
