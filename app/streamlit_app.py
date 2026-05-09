@@ -234,7 +234,7 @@ def score_customer(
 def render_risk_badge(band: str) -> str:
     css = {"Low": "badge-low", "Medium": "badge-medium", "High": "badge-high"}
     cls = css.get(band, "badge-medium")
-    return f'<span class="badge {cls}">{band.upper()} RISK</span>'
+    return f'<span class="badge {cls}">{band} Risk</span>'
 
 
 def render_prob_bar(prob: float) -> str:
